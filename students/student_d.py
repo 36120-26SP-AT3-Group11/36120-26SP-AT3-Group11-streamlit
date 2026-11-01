@@ -26,7 +26,7 @@ try:
 except ImportError:  # running this file on its own
     import ui
 
-DEFAULT_API_URL = "https://at3-student-d-tor-api.onrender.com"
+DEFAULT_API_URL = "https://group11-studentd-api.onrender.com"
 TOKENS = ["BTC", "ETH", "XRP", "SOL", "DOGE", "XMR", "XLM", "TRX"]
 CONNECT_TIMEOUT = 8  # seconds
 READ_TIMEOUT = 60  # free Render services can take up to a minute to wake up

@@ -21,7 +21,7 @@ No model runs inside Streamlit: every prediction, feature and piece of model met
 | Student A API | https://group11-studenta-api.onrender.com |
 | Student B API | https://group11-studentb-api.onrender.com |
 | Student C API | https://group11-studentc-api.onrender.com |
-| Student D API | [add URL] |
+| Student D API | https://group11-studentd-api.onrender.com |
 
 The APIs run on Render's free plan and sleep after about 15 minutes without traffic. Open each `/health` page a
 minute before using the app so every service is awake.
@@ -74,6 +74,7 @@ Each page reads its API URL from an environment variable and falls back to the d
 |---|---|
 | `STUDENT_A_API_URL` | https://group11-studenta-api.onrender.com |
 | `STUDENT_B_API_URL` | https://group11-studentb-api.onrender.com |
+| `STUDENT_D_API_URL` | https://group11-studentd-api.onrender.com |
 
 ## Run with Docker
 
