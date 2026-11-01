@@ -1,16 +1,17 @@
-"""Student D tab - Trading Opportunity Rating (TOR).
+"""Student D - Trading Opportunity Rating (TOR) page.
 
 Shows the outputs required by the brief - Recommendation, Prediction Confidence Score and
-Feature Importance - plus Student D's volume features, using only HTTP calls to Student D's
-FastAPI service (no model inference happens in Streamlit). Every section degrades on its own:
-if one call fails the rest of the page still renders, and if the API is down the page explains
-what happened while the rest of the application keeps working.
+Feature Importance - plus Student D's volume features. All numbers come from the Student D
+FastAPI service over HTTP; no model runs in Streamlit. Each section degrades on its own, so if
+one call fails the rest of the page still renders. Layout and colours come from students/ui.py.
 
-Usage from ``app/main.py``::
-
+Use from the main app:
     from students import student_d
-    student_d.render(token)       # full page
-    student_d.home_chart(token)   # one small visual for the home page
+    student_d.render(token)       # full page (app/main.py draws the page banner)
+    student_d.home_chart(token)   # compact visual for the home page
+
+Run on its own for testing:
+    streamlit run students/student_d.py
 """
 
 import os
@@ -20,15 +21,34 @@ import pandas as pd
 import requests
 import streamlit as st
 
+try:
+    from students import ui
+except ImportError:  # running this file on its own
+    import ui
+
 DEFAULT_API_URL = "https://at3-student-d-tor-api.onrender.com"
+TOKENS = ["BTC", "ETH", "XRP", "SOL", "DOGE", "XMR", "XLM", "TRX"]
 CONNECT_TIMEOUT = 8  # seconds
-READ_TIMEOUT = 60  # free Render instances need ~30-60 s to wake up
+READ_TIMEOUT = 60  # free Render services can take up to a minute to wake up
 CACHE_SECONDS = 300
 FORECAST_HORIZON = 7
 
+TITLE = "Trading Opportunity Rating"
+ACCENT = ui.ACCENTS["D"]
+DESCRIPTION = (f"Should you buy, hold or sell over the next {FORECAST_HORIZON} days? A LightGBM classifier "
+               "rates each coin from Strong Sell to Strong Buy using momentum (Student A), trend "
+               "(Student B), volatility (Student C) and trading volume (Student D).")
+
 TOR_LABELS = ["Strong Sell", "Sell", "Hold", "Buy", "Strong Buy"]
-RATING_COLOURS = ["#c0392b", "#e67e22", "#95a5a6", "#2ecc71", "#1e8449"]
-COLOUR_BY_RATING = dict(zip(TOR_LABELS, RATING_COLOURS))
+COLOUR_BY_RATING = dict(zip(TOR_LABELS, ui.SCALE_5))
+
+FEATURE_LABELS = {
+    "Return20": "20-day return (Student A)",
+    "MA5_MA20": "MA5 / MA20 trend ratio (Student B)",
+    "Volatility20": "20-day volatility (Student C)",
+    "RelativeVolume": "Relative volume (Student D)",
+    "OpportunityScore": "Opportunity score (derived)",
+}
 SOURCE_LABELS = {
     "student_a_api": "Student A API",
     "student_b_api": "Student B API",
@@ -39,6 +59,7 @@ SOURCE_LABELS = {
 }
 
 
+# ---------- API calls ----------
 class ApiUnavailableError(Exception):
     """Raised for any failure to obtain a usable response from the Student D API."""
 
@@ -108,183 +129,150 @@ def fetch_metadata(base_url: str) -> dict:
     return _request("GET", base_url, "/model-metadata")
 
 
-def _rating_badge(rating: str | None, caption: str) -> None:
-    colour = COLOUR_BY_RATING.get(rating, "#7f8c8d")
-    st.markdown(
-        f"<div style='font-size:0.85rem;opacity:0.7'>{caption}</div>"
-        f"<div style='font-size:2rem;font-weight:700;color:{colour}'>{rating or 'Unavailable'}</div>",
-        unsafe_allow_html=True,
-    )
+CACHES = (fetch_prediction, fetch_features, fetch_metadata)
 
 
+# ---------- Charts ----------
 def _probability_chart(probabilities: dict, height) -> alt.Chart:
     df = pd.DataFrame({"Rating": TOR_LABELS, "Probability": [probabilities.get(r, 0) for r in TOR_LABELS]})
-    return (
-        alt.Chart(df)
-        .mark_bar()
-        .encode(
-            y=alt.Y("Rating:N", sort=TOR_LABELS, title=None),
-            x=alt.X("Probability:Q", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format="%")),
-            color=alt.Color("Rating:N", scale=alt.Scale(domain=TOR_LABELS, range=RATING_COLOURS), legend=None),
-            tooltip=["Rating", alt.Tooltip("Probability:Q", format=".1%")],
-        )
-        .properties(height=height)
+    bars = alt.Chart(df).mark_bar(cornerRadiusEnd=6).encode(
+        y=alt.Y("Rating:N", sort=TOR_LABELS, title=None),
+        x=alt.X("Probability:Q", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format="%"), title=None),
+        color=alt.Color("Rating:N", scale=alt.Scale(domain=TOR_LABELS, range=ui.SCALE_5), legend=None),
+        tooltip=["Rating", alt.Tooltip("Probability:Q", format=".1%")],
     )
+    text = bars.mark_text(align="left", dx=6, color=ui.TEXT).encode(
+        text=alt.Text("Probability:Q", format=".0%"))
+    return (bars + text).properties(height=height)
 
 
+# ---------- Page sections ----------
 def _show_prediction(token: str, prediction: dict) -> None:
-    st.subheader("7-day recommendation")
-    col_rec, col_conf, col_now = st.columns(3)
-    with col_rec:
-        _rating_badge(prediction["prediction"], f"Predicted rating for {prediction['prediction_date']}")
-    with col_conf:
-        confidence = float(prediction["confidence"])
-        st.metric("Prediction confidence", f"{confidence:.0%}")
-        st.progress(min(max(confidence, 0.0), 1.0), text="Probability of the predicted rating")
-    with col_now:
-        current = prediction.get("current_opportunity") or {}
-        _rating_badge(current.get("rating"), f"Rating implied by data on {prediction['as_of_date']}")
-        if current.get("opportunity_score") is not None:
-            st.caption(f"Opportunity score: {current['opportunity_score']:.3f}")
-        elif not current.get("rating"):
-            st.caption("Needs every input; unavailable while another service is down.")
+    rating = prediction["prediction"]
+    confidence = float(prediction["confidence"])
+    current = prediction.get("current_opportunity") or {}
 
-    st.altair_chart(
-        _probability_chart(prediction["class_probabilities"], alt.Step(34)).properties(
-            title=f"{token}: probability of each rating in {FORECAST_HORIZON} days"
-        ),
-        width="stretch",
-    )
+    with st.container(border=True):
+        info_col, chart_col = st.columns([1, 1], vertical_alignment="center")
+        with info_col:
+            ui.level_badge(rating, COLOUR_BY_RATING.get(rating, ui.MUTED))
+            m1, m2 = st.columns(2)
+            m1.metric(f"Rating for {prediction['prediction_date']}", rating)
+            m2.metric("Prediction confidence", f"{confidence:.0%}")
+            st.progress(min(max(confidence, 0.0), 1.0), text="Probability of the predicted rating")
+            if current.get("rating"):
+                st.write(f"Today's data ({prediction['as_of_date']}) implies **{current['rating']}** "
+                         f"(opportunity score {current['opportunity_score']:.3f}); the model expects "
+                         f"**{rating}** for {token} in {FORECAST_HORIZON} days.")
+            else:
+                st.caption("Today's rating needs every input, so it is hidden while another service is down.")
+        with chart_col:
+            st.altair_chart(_probability_chart(prediction["class_probabilities"], alt.Step(34)),
+                            width="stretch")
+            st.caption(f"Probability of each rating in {FORECAST_HORIZON} days.")
 
-    missing = prediction.get("missing_features") or []
-    if missing:
-        st.warning(
-            f"Degraded prediction: {', '.join(missing)} unavailable because another student's service "
-            "did not respond. The LightGBM model handled the gap with its missing-value logic, so treat "
-            "the confidence with care."
-        )
-
-
-def _show_inputs(prediction: dict, metadata: dict | None) -> None:
-    st.subheader("Model inputs used")
-    descriptions = (metadata or {}).get("feature_descriptions", {})
-    sources = prediction.get("feature_sources", {})
-    rows = [
-        {
-            "Feature": name,
-            "Value": value,
-            "Source": SOURCE_LABELS.get(sources.get(name), "Unknown"),
-            "Description": descriptions.get(name, ""),
-        }
-        for name, value in prediction.get("features_used", {}).items()
-    ]
-    st.dataframe(
-        pd.DataFrame(rows),
-        hide_index=True,
-        width="stretch",
-        column_config={"Value": st.column_config.NumberColumn(format="%.4f")},
-    )
-
-
-def _show_feature_importance(metadata: dict) -> None:
-    st.subheader("Feature importance")
-    importance = metadata.get("feature_importance", {})
-    if not importance:
-        st.info("The API returned no feature importance values.")
-        return
-    df = pd.DataFrame({"Feature": list(importance), "Importance": list(importance.values())})
-    df["Description"] = df["Feature"].map(metadata.get("feature_descriptions", {}))
-    chart = (
-        alt.Chart(df)
-        .mark_bar(color="#f59e0b")
-        .encode(
-            y=alt.Y("Feature:N", sort="-x", title=None),
-            x=alt.X("Importance:Q", axis=alt.Axis(format="%"), title="Share of total gain"),
-            tooltip=["Feature", alt.Tooltip("Importance:Q", format=".1%"), "Description"],
-        )
-        .properties(height=alt.Step(40))
-    )
-    st.altair_chart(chart, width="stretch")
-    st.caption(
-        f"{metadata.get('algorithm', 'LightGBM')}, gain-based importance: higher means the feature "
-        "contributed more to the model's splits."
-    )
+    ui.missing_inputs_warning(prediction.get("missing_features") or [], FEATURE_LABELS)
 
 
 def _show_volume_history(features: dict) -> None:
-    st.subheader("Volume features (owned by Student D)")
+    ui.section("Trading volume (Student D's features)",
+               "Relative volume compares today's volume with its 20-day average. Above 1 means busier "
+               "than normal; it is capped at 2 in the opportunity score.", ACCENT)
     history = pd.DataFrame(features["history"])
     history["date"] = pd.to_datetime(history["date"])
 
-    volume = alt.Chart(history).mark_bar(color="#94a3b8", opacity=0.6).encode(
+    volume = alt.Chart(history).mark_bar(color=ui.NEUTRAL_BAR, opacity=0.5).encode(
         x=alt.X("date:T", title=None),
         y=alt.Y("volume:Q", title="Daily volume"),
         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("volume:Q", format=",.0f")],
     )
-    sma = alt.Chart(history).mark_line(color="#f59e0b").encode(
+    sma = alt.Chart(history).mark_line(color=ACCENT, strokeWidth=2).encode(
         x="date:T", y="VolumeSMA20:Q", tooltip=[alt.Tooltip("VolumeSMA20:Q", format=",.0f")]
     )
-    relative = alt.Chart(history).mark_line(color="#8b5cf6").encode(
+    relative = alt.Chart(history).mark_line(color=ui.ACCENT).encode(
         x=alt.X("date:T", title=None),
         y=alt.Y("RelativeVolume:Q", title="Relative volume"),
         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("RelativeVolume:Q", format=".2f")],
     )
-    guides = alt.Chart(pd.DataFrame({"y": [1.0, 2.0]})).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
+    guides = alt.Chart(pd.DataFrame({"y": [1.0, 2.0]})).mark_rule(
+        strokeDash=[4, 4], color=ui.MUTED).encode(y="y:Q")
 
     left, right = st.columns(2)
     left.altair_chart((volume + sma).properties(height=260, title="Volume and its 20-day average"),
                       width="stretch")
-    right.altair_chart(
-        (relative + guides).properties(height=260, title="Relative volume (capped at 2 in the score)"),
-        width="stretch",
-    )
+    right.altair_chart((relative + guides).properties(height=260, title="Relative volume"),
+                       width="stretch")
     st.caption(f"Data source: {features.get('data_source', 'n/a')}, last complete day "
                f"{features.get('as_of_date', 'n/a')}.")
 
 
-def _show_model_details(metadata: dict) -> None:
-    with st.expander("About the model"):
+def _show_model(metadata: dict) -> None:
+    ui.section("What drives the forecast",
+               "The short-term trend (MA5 / MA20) carries most of the model's decisions, followed by "
+               "the 20-day return.", ACCENT)
+    importance = metadata.get("feature_importance", {})
+    if importance:
+        ui.importance_chart(importance, FEATURE_LABELS, accent=ACCENT)
+    else:
+        st.info("The API returned no feature importance values.")
+
+    evaluation = metadata.get("evaluation", {})
+    test, persistence = evaluation.get("test"), evaluation.get("baseline_persistence")
+    if test and persistence:
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Macro-F1 (test)", f"{test['macro_f1']:.3f}",
+                  delta=f"{test['macro_f1'] - persistence['macro_f1']:+.3f} vs baseline")
+        k2.metric("Accuracy (test)", f"{test['accuracy']:.0%}",
+                  delta=f"{(test['accuracy'] - persistence['accuracy']) * 100:+.0f} pts vs baseline")
+        k3.metric("Forecast horizon", f"{metadata.get('forecast_horizon', FORECAST_HORIZON)} days")
+
+    with st.expander("About the model", icon=":material/model_training:"):
+        training = metadata.get("training_data", {})
         st.markdown(
-            f"**Target:** {metadata.get('target', 'n/a')}  \n"
-            f"**Algorithm:** {metadata.get('algorithm', 'n/a')} (tuned with Optuna)  \n"
-            f"**Forecast horizon:** {metadata.get('forecast_horizon', 'n/a')} days  \n"
-            f"**Features:** {', '.join(metadata.get('features', [])) or 'n/a'}"
+            f"- **Target:** {metadata.get('target', 'n/a')}\n"
+            f"- **Algorithm:** {metadata.get('algorithm', 'n/a')}, tuned with Optuna\n"
+            f"- **Trained on:** {training.get('n_rows', 'n/a')} daily rows, "
+            f"{training.get('start_date', '?')} to {training.get('end_date', '?')}, from "
+            f"{training.get('source', 'n/a')}\n"
+            "- **Baseline:** assuming the rating in 7 days equals today's rating"
         )
         rules = metadata.get("classification_rules", {})
         if rules:
             st.markdown("**Rating rules** (OS = 0.40·M + 0.30·T + 0.20·V − 0.10·R)")
-            st.table(pd.DataFrame({"Rating": list(rules), "Rule": list(rules.values())}))
-        evaluation = metadata.get("evaluation", {})
+            st.dataframe(pd.DataFrame({"Rating": list(rules), "Rule": list(rules.values())}),
+                         hide_index=True, width="stretch")
         rows = [
             {"Scenario": name.replace("_", " "),
              **{k: scores.get(k) for k in ("accuracy", "balanced_accuracy", "macro_f1")}}
             for name, scores in evaluation.items()
         ]
         if rows:
-            st.markdown("**Held-out test performance** (including upstream-outage scenarios)")
+            st.markdown("**Held-out test performance**, including scenarios where a teammate's service is down")
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        training = metadata.get("training_data", {})
-        st.caption(
-            f"Trained on {training.get('n_rows', 'n/a')} rows ({training.get('start_date', '?')} to "
-            f"{training.get('end_date', '?')}) from {training.get('source', 'n/a')}. "
-            "For decision support only, not financial advice."
-        )
 
 
+# ---------- Home-page visual ----------
+def home_chart(token: str) -> None:
+    with st.spinner("Getting the trading opportunity forecast..."):
+        try:
+            prediction = fetch_prediction(api_url(), token)
+        except ApiUnavailableError as exc:
+            st.warning(f"Trading opportunity forecast unavailable: {exc}.")
+            return
+    st.metric(f"{token} rating on {prediction['prediction_date']}", prediction["prediction"],
+              f"{float(prediction['confidence']):.0%} confidence", delta_color="off")
+    st.altair_chart(_probability_chart(prediction["class_probabilities"], alt.Step(20)), width="stretch")
+    if prediction.get("missing_features"):
+        st.caption("Some inputs were unavailable, so confidence is lower.")
+
+
+# ---------- Full page ----------
 def render(token: str) -> None:
-    """Render the Trading Opportunity Rating tab for ``token`` (e.g. ``"BTC"``)."""
     base_url = api_url()
-    st.header("Trading Opportunity Rating (TOR)")
-    st.caption(
-        f"Should you buy, hold or sell {token} over the next {FORECAST_HORIZON} days? LightGBM classifier "
-        "served by Student D's API, using momentum, trend, volume and volatility."
-    )
+    st.caption(DESCRIPTION)
 
-    if st.button("Refresh", key=f"tor_refresh_{token}"):
-        fetch_prediction.clear()
-        fetch_features.clear()
-
-    with st.spinner("Contacting the Trading Opportunity API (it may take up to a minute to wake up)..."):
+    with st.spinner("Getting the forecast (the first request can take up to a minute while the "
+                    "service wakes up)..."):
         results, errors = {}, {}
         for name, fetch in (
             ("prediction", lambda: fetch_prediction(base_url, token)),
@@ -297,27 +285,21 @@ def render(token: str) -> None:
                 errors[name] = str(exc)
 
     if not results:
-        st.error(
-            f"The Trading Opportunity API is unavailable right now: {errors['prediction']}. "
-            "The other tabs are not affected. Please try again in a moment."
-        )
+        ui.api_error(f"The Trading Opportunity API is unavailable right now: {errors['prediction']}. "
+                     "The other pages are not affected.", "retry_d", CACHES)
         return
 
     prediction, metadata, features = (results.get(k) for k in ("prediction", "metadata", "features"))
     if prediction:
         _show_prediction(token, prediction)
+        ui.inputs_table(
+            prediction.get("features_used", {}),
+            {f: SOURCE_LABELS.get(s, s) for f, s in prediction.get("feature_sources", {}).items()},
+            FEATURE_LABELS,
+        )
     else:
-        st.error(f"The recommendation is unavailable right now: {errors['prediction']}.")
-
-    left, right = st.columns(2)
-    with left:
-        if metadata:
-            _show_feature_importance(metadata)
-        else:
-            st.warning(f"Feature importance is unavailable: {errors['metadata']}.")
-    with right:
-        if prediction:
-            _show_inputs(prediction, metadata)
+        ui.api_error(f"The recommendation is unavailable right now: {errors['prediction']}.",
+                     "retry_d", CACHES)
 
     if features:
         _show_volume_history(features)
@@ -325,20 +307,19 @@ def render(token: str) -> None:
         st.warning(f"Volume history is unavailable: {errors['features']}.")
 
     if metadata:
-        _show_model_details(metadata)
+        _show_model(metadata)
+    else:
+        st.warning(f"Model information is unavailable: {errors['metadata']}.")
+
+    ui.limitations("Ratings use past prices and volume only and cannot anticipate news or sudden shocks. "
+                   "The model beats the 'rating stays the same' baseline only narrowly and rarely "
+                   "predicts Strong Sell. Read a Buy alongside the Market Risk page.")
 
 
-def home_chart(token: str) -> None:
-    """One small visual for the home page: the 7-day recommendation and its class probabilities."""
-    base_url = api_url()
-    st.subheader("Trading Opportunity (7 days)")
-    try:
-        prediction = fetch_prediction(base_url, token)
-    except ApiUnavailableError:
-        st.info("Trading Opportunity Rating is unavailable right now.")
-        return
-    st.metric("Recommendation", prediction["prediction"],
-              f"{float(prediction['confidence']):.0%} confidence", delta_color="off")
-    st.altair_chart(_probability_chart(prediction["class_probabilities"], alt.Step(22)), width="stretch")
-    if prediction.get("missing_features"):
-        st.caption("Some inputs were unavailable, so confidence is lower.")
+# ---------- Standalone preview: streamlit run students/student_d.py ----------
+if __name__ == "__main__":
+    st.set_page_config(page_title=TITLE, layout="wide")
+    ui.apply_theme()
+    selected = st.sidebar.selectbox("Cryptocurrency", TOKENS)
+    ui.page_banner("Student D · LightGBM classification · 7 days ahead", f"{TITLE} · {selected}", "", ACCENT)
+    render(selected)
