@@ -17,7 +17,7 @@ No model runs inside Streamlit: every prediction, feature and piece of model met
 
 | Component | URL |
 |---|---|
-| Streamlit app | [add after deployment] |
+| Streamlit app | https://group11-crypto.streamlit.app |
 | Student A API | https://group11-studenta-api.onrender.com |
 | Student B API | https://group11-studentb-api.onrender.com |
 | Student C API | https://group11-studentc-api.onrender.com |
@@ -74,6 +74,7 @@ Each page reads its API URL from an environment variable and falls back to the d
 |---|---|
 | `STUDENT_A_API_URL` | https://group11-studenta-api.onrender.com |
 | `STUDENT_B_API_URL` | https://group11-studentb-api.onrender.com |
+| `STUDENT_C_API_URL` | https://group11-studentc-api.onrender.com |
 | `STUDENT_D_API_URL` | https://group11-studentd-api.onrender.com |
 
 ## Run with Docker
