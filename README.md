@@ -11,7 +11,7 @@ No model runs inside Streamlit: every prediction, feature and piece of model met
 | Vivek Rai | 25731011 | Student A | Asset Performance Index (API) |
 | Sai Lokesh Arvapalli | 25598311 | lokeshUTS | Student B | Market Risk Index
 | Sai Prasad Kammari | 25693969 | saiprasad0722 | Student C | Trend Category (TC) |
-| [Name] | [ID] | Student D | Trading Opportunity Rating (TOR) |
+| Arsh Mansuri | 25522436 | Student D | Trading Opportunity Rating (TOR) |
 
 ## Live services
 
