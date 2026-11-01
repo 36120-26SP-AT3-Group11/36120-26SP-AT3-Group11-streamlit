@@ -52,6 +52,42 @@ h1, h2, h3 {{ font-family: 'Space Grotesk', 'Inter', sans-serif !important; lett
   backdrop-filter: blur(12px);
   border-bottom: 1px solid {BORDER};
 }}
+/* Centre the top navigation links in the header */
+[data-testid="stToolbar"] .rc-overflow {{
+  justify-content: center;
+}}
+@media (min-width: 1500px) {{
+  /* offset by the width of the Share/GitHub buttons on the right so the links sit at the true centre */
+  [data-testid="stToolbar"] .rc-overflow {{ padding-left: 200px; }}
+}}
+/* Bigger top navigation links */
+[data-testid="stTopNavLink"] {{
+  font-size: 1.05rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 10px;
+}}
+[data-testid="stTopNavLink"] span {{
+  font-size: 1.05rem;
+}}
+[data-testid="stTopNavLink"] [data-testid="stIconMaterial"] {{
+  font-size: 1.3rem;
+}}
+/* Slightly bigger coin buttons */
+.st-key-coin_pills [data-testid="stButtonGroup"] button {{
+  font-size: 0.98rem;
+  padding: 0.4rem 1rem;
+  min-height: 2.4rem;
+}}
+.st-key-coin_pills [data-testid="stButtonGroup"] button p {{
+  font-size: 0.98rem;
+}}
+/* Centre the coin picker, also when it wraps onto two lines */
+.st-key-coin_pills {{
+  align-self: center;
+}}
+.st-key-coin_pills [data-testid="stButtonGroup"] > div {{
+  justify-content: center;
+}}
 
 /* Sidebar */
 [data-testid="stSidebar"] {{
