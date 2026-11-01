@@ -1,0 +1,10 @@
+[project]
+name = "crypto-financial-intelligence-platform"
+version = "1.0.0"
+description = "Group 11 (36120 AT3): Streamlit front end for four cryptocurrency forecasting FastAPI services"
+requires-python = "==3.12.13"
+dependencies = [
+    "streamlit==1.59.0",
+    "pandas==2.2.2",
+    "requests",
+]
